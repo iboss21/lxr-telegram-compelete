@@ -10,21 +10,7 @@ local selectedLocation = ''
 local LocationETA = ''
 local ETADisplay = nil 
 local playermailboxId = nil
-local isOpen = false
-local news = {}
-local animselected = 0
-
--- Function to open the mailbox menu
-function OpenMailboxMenu(hasMailbox,model,name,source)
-    SendMessagePage = nil
-    CheckMessagePage = nil
-	MailActionPage = nil
-    if playermailboxId == nil then
-        playermailboxId = "Not Registered"
-    end
-    if not MailboxMenu then
-        MailboxMenu = nil
-        MailboxMenu = FeatherMenu:RegisterMenu('feather:mailbox:menu', {
+--[[
 			top = "15%",
             left = "25%",
             ['720width'] = '900px',
@@ -44,7 +30,6 @@ function OpenMailboxMenu(hasMailbox,model,name,source)
                     ['padding'] = '10px 20px',
                     ['margin-top'] = '5px',
                     ['cursor'] = 'pointer', 
-                    ['box-shadow'] = '3px 3px #333333', 
                     ['text-transform'] = 'uppercase', 
             },
             contentslot = {

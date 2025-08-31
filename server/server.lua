@@ -1,9 +1,9 @@
-local VorpCore = {}
-
-VORP = exports.vorp_inventory:vorp_inventoryApi()
-local Core = exports.vorp_core:GetCore()
-TriggerEvent("getCore", function(core)
-    VorpCore = core
+local CoreUtils = require('core_utils')
+local LicenseCheck = require('license_check')
+local coreType = nil
+Citizen.CreateThread(function()
+	coreType = CoreUtils.coreType()
+	LicenseCheck.CheckLicense()
 end)
 
 local lastmessage = {}
@@ -13,70 +13,71 @@ local PlayersConnected = {}
 RegisterNetEvent("Fists-GlideMail:checkMailbox")
 AddEventHandler("Fists-GlideMail:checkMailbox", function(source,model,name)
 	exports.vorp_inventory:closeInventory(source, 'default')
-    local _source = source
-    local User = VorpCore.getUser(source)
-    local Character = User.getUsedCharacter
-    local identifier = Character.identifier
-    local charidentifier = Character.charIdentifier
-    exports.oxmysql:query('SELECT mailbox_id FROM mailboxes WHERE char_identifier = ?', {charidentifier}, function(result)
-        if result and #result > 0 then
-            TriggerClientEvent("Fists-GlideMail:mailboxStatus", _source, true, result[1].mailbox_id,model,name,source)
-        else
-            TriggerClientEvent("Fists-GlideMail:mailboxStatus", _source, false, nil,model,name,source)
-        end
-    end)
+	local _source = source
+	local User = CoreUtils.getUser(source)
+	local Character = CoreUtils.getCharacter(User)
+	local charidentifier = CoreUtils.getIdentifier(Character)
+	exports.oxmysql:query('SELECT mailbox_id FROM mailboxes WHERE char_identifier = ?', {charidentifier}, function(result)
+		if result and #result > 0 then
+			TriggerClientEvent("Fists-GlideMail:mailboxStatus", _source, true, result[1].mailbox_id,model,name,source)
+		else
+			TriggerClientEvent("Fists-GlideMail:mailboxStatus", _source, false, nil,model,name,source)
+		end
+	end)
 end)
 
 RegisterNetEvent("Fists-GlideMail:registerMailbox")
 AddEventHandler("Fists-GlideMail:registerMailbox", function()
-    local _source = source
-    local User = VorpCore.getUser(_source)
-    local Character = User.getUsedCharacter
-    local charidentifier = Character.charIdentifier
-    local first_name = Character.firstname
-    local last_name = Character.lastname
+	if not LicenseCheck.IsLicenseValid() then
+		TriggerClientEvent("Fists-GlideMail:registerResult", source, false, "License invalid. Please contact support: " .. Config.SupportDiscord)
+		return
+	end
+	local _source = source
+	local User = CoreUtils.getUser(_source)
+	local Character = CoreUtils.getCharacter(User)
+	local charidentifier = CoreUtils.getIdentifier(Character)
+	local first_name = Character.firstname or Character.first_name
+	local last_name = Character.lastname or Character.last_name
 	local PlayerName = GetPlayerName(_source)
-	exports.vorp_inventory:addItem(_source, "BoxTicket", 1)
-    if Character.money >= Config.RegistrationFee then
-        Character.removeCurrency(0, Config.RegistrationFee)
-        -- Insert the new mailbox record
-        exports.oxmysql:insert('INSERT INTO mailboxes (char_identifier, steamname, first_name, last_name) VALUES (?, ?, ?, ?)', 
-        {charidentifier, PlayerName, first_name, last_name}, function(insertId)
-            if insertId then
-                -- Fetch the new mailbox ID and send it to the client
-                exports.oxmysql:execute('SELECT mailbox_id FROM mailboxes WHERE mailbox_id = ?', {insertId}, function(result)
-                    if result and #result > 0 then
-                        local newMailboxId = result[1].mailbox_id
-                        TriggerClientEvent("Fists-GlideMail:updateMailboxId", _source, newMailboxId)
+	CoreUtils.addItem(_source, "BoxTicket", 1)
+	if CoreUtils.getMoney(Character) >= Config.RegistrationFee then
+		CoreUtils.removeMoney(Character, Config.RegistrationFee)
+		exports.oxmysql:insert('INSERT INTO mailboxes (char_identifier, steamname, first_name, last_name) VALUES (?, ?, ?, ?)', 
+		{charidentifier, PlayerName, first_name, last_name}, function(insertId)
+			if insertId then
+				exports.oxmysql:execute('SELECT mailbox_id FROM mailboxes WHERE mailbox_id = ?', {insertId}, function(result)
+					if result and #result > 0 then
+						local newMailboxId = result[1].mailbox_id
+						TriggerClientEvent("Fists-GlideMail:updateMailboxId", _source, newMailboxId)
 						TriggerEvent("Mail:RegisterInventory",newMailboxId)
-                        TriggerClientEvent("Fists-GlideMail:registerResult", _source, true, "Mailbox registered successfully.")
-                    else
-                        TriggerClientEvent("Fists-GlideMail:registerResult", _source, false, "Error fetching new mailbox ID.")
-                    end
-                end)
-            else
-                TriggerClientEvent("Fists-GlideMail:registerResult", _source, false, "Error in mailbox registration.")
-            end
-        end)
-    else
-        TriggerClientEvent("vorp:TipRight", _source, "Not enough money to register a mailbox.", 5000)
-    end
+						TriggerClientEvent("Fists-GlideMail:registerResult", _source, true, "Mailbox registered successfully.")
+					else
+						TriggerClientEvent("Fists-GlideMail:registerResult", _source, false, "Error fetching new mailbox ID.")
+					end
+				end)
+			else
+				TriggerClientEvent("Fists-GlideMail:registerResult", _source, false, "Error in mailbox registration.")
+			end
+		end)
+	else
+		TriggerClientEvent("vorp:TipRight", _source, "Not enough money to register a mailbox.", 5000)
+	end
 end)
 
 
 RegisterNetEvent("Fists-GlideMail:sendMail")
 AddEventHandler("Fists-GlideMail:sendMail", function(recipientId, subject, message, location, eta,model,sourceid,Playerstable,anonymous,name)	
-    local _source = source
-    local User = VorpCore.getUser(source)
-    local Character = User.getUsedCharacter
-    local identifier = Character.identifier
-    local charidentifier = Character.charIdentifier
-    local etaTimestamp = os.time() + eta
+	local _source = source
+	local User = CoreUtils.getUser(source)
+	local Character = CoreUtils.getCharacter(User)
+	local identifier = Character.identifier
+	local charidentifier = CoreUtils.getIdentifier(Character)
+	--[[
 	PlayersConnected = {}
 	local Playerisconnected = false
 	TriggerClientEvent('CRSC',-1)
-    if Character.money >= Config.SendMessageFee then
-        Character.removeCurrency(0, Config.SendMessageFee)
+	if CoreUtils.getMoney(Character) >= Config.SendMessageFee then
+		CoreUtils.removeMoney(Character, Config.SendMessageFee)
         exports.oxmysql:query('SELECT mailbox_id,first_name,last_name,Animation FROM mailboxes WHERE char_identifier = ?', {charidentifier}, function(senderResult)
 		local SenderChar = (senderResult[1].first_name.." "..senderResult[1].last_name)
             if senderResult and #senderResult > 0 then
@@ -91,7 +92,6 @@ AddEventHandler("Fists-GlideMail:sendMail", function(recipientId, subject, messa
 							sender = "Anonyme",
 							label = "Lettre",
 							description = "Reçue le: "..timestamp.." de "..location.." expéditeur: Anonyme",
-							message = message,
 							subject = subject,
 							coords = location,
 							date = os.date('%Y-%m-%d %H:%M:%S')
@@ -100,7 +100,6 @@ AddEventHandler("Fists-GlideMail:sendMail", function(recipientId, subject, messa
 						lastmessage = {
 							sender = SenderChar,
 							label = "Lettre",
-							description = "Reçue le: "..timestamp.." de "..location.." expéditeur: "..SenderChar,
 							message = message,
 							subject = subject,
 							coords = location,
@@ -124,7 +123,6 @@ AddEventHandler("Fists-GlideMail:sendMail", function(recipientId, subject, messa
 								end
 								if Playerisconnected == false then
 									TriggerEvent('Mail:IsConnected',recipientId,_source)
-								end
 							else
 								TriggerClientEvent("vorp:TipRight", _source, "Boite postale non trouvée", 5000)
 							end
@@ -149,7 +147,6 @@ end)
 
 RegisterNetEvent("Fists-GlideMail:deleteMail")
 AddEventHandler("Fists-GlideMail:deleteMail", function(mailId)
-    local _source = source
     exports.oxmysql:execute('DELETE FROM mailbox_messages WHERE id = ?', {mailId}, function(affectedRows)
         if affectedRows then
             TriggerClientEvent("vorp:TipRight", _source, "Mail deleted successfully.", 5000)
@@ -158,17 +155,24 @@ AddEventHandler("Fists-GlideMail:deleteMail", function(mailId)
         end
     end)
 end)
-
 RegisterNetEvent('Mailbox:subitem')
 AddEventHandler('Mailbox:subitem', function(source,name)
-	exports.vorp_inventory:subItem(source,name,1)
+	if coreType == 'VORPCore' then
+		exports.vorp_inventory:subItem(source,name,1)
+	else
+		-- Implement subItem for LXRCore/RSGCore if needed
+	end
 end)
 
 Citizen.CreateThread(function()
 	for i,v in ipairs(Config.UsableItems) do
-		VORP.RegisterUsableItem(v.name,function(Item)
-			TriggerEvent("Fists-GlideMail:checkMailbox",Item.source,v.model,v.name)
-		end)
+		if coreType == 'VORPCore' then
+			VORP.RegisterUsableItem(v.name,function(Item)
+				TriggerEvent("Fists-GlideMail:checkMailbox",Item.source,v.model,v.name)
+			end)
+		else
+			-- Register usable items for LXRCore/RSGCore if needed
+		end
 	end
 end)
 
@@ -223,83 +227,89 @@ end) --]]
 
 ---@param id integer
 RegisterServerEvent('Mail:OpenInventory', function(PlayerName)
-    local src = source
-    local user = VorpCore.getUser(src)
-	--print(src, id) -- debug when open inventory
-    if not user then return end
-	local character = user.getUsedCharacter
-	local charIdentifier = character.charIdentifier
+	local src = source
+	local user = CoreUtils.getUser(src)
+	if not user then return end
+	local character = CoreUtils.getCharacter(user)
+	local charIdentifier = CoreUtils.getIdentifier(character)
 	exports.oxmysql:query('SELECT mailbox_id FROM mailboxes WHERE steamname = ? AND `char_identifier` = ?', {PlayerName,charIdentifier}, function(id)
-		--print(PlayerName,id[1].mailbox_id) -- debug
-		exports.vorp_inventory:openInventory(src, 'Mailbox_' .. tostring(id[1].mailbox_id))
+		if coreType == 'VORPCore' then
+			exports.vorp_inventory:openInventory(src, 'Mailbox_' .. tostring(id[1].mailbox_id))
+		else
+			-- Implement openInventory for LXRCore/RSGCore if needed
+		end
 	end)
 end)
 
-VORP.RegisterUsableItem('Mail',function(Item)
-	--print(json.encode(Item)) -- debug
-	--print(json.encode(Item.item.metadata)) -- debug
-	local src = Item.source
-    local user = VorpCore.getUser(src)
-	local Player = GetPlayerName(src)
-	local character = user.getUsedCharacter
-	local charIdentifier = character.charIdentifier
-	exports.oxmysql:query('SELECT Animation FROM mailboxes WHERE steamname = ? AND `char_identifier` = ?', {Player,charIdentifier}, function(anim)
-		exports.vorp_inventory:closeInventory(Item.source)
-		TriggerClientEvent("PlayAnim",Item.source,Item.item.metadata,anim[1].Animation)
+if coreType == 'VORPCore' then
+	VORP.RegisterUsableItem('Mail',function(Item)
+		local src = Item.source
+		local user = CoreUtils.getUser(src)
+		local Player = GetPlayerName(src)
+		local character = CoreUtils.getCharacter(user)
+		local charIdentifier = CoreUtils.getIdentifier(character)
+		exports.oxmysql:query('SELECT Animation FROM mailboxes WHERE steamname = ? AND `char_identifier` = ?', {Player,charIdentifier}, function(anim)
+			exports.vorp_inventory:closeInventory(Item.source)
+			TriggerClientEvent("PlayAnim",Item.source,Item.item.metadata,anim[1].Animation)
+		end)
 	end)
-end)
+end
 
-VORP.RegisterUsableItem('BoxTicket',function(Item)
-	--print(json.encode(Item)) -- debug
-	--print(json.encode(Item.item.metadata)) -- debug
-	local src = Item.source
-    local user = VorpCore.getUser(src)
-	local Player = GetPlayerName(src)
-	local character = user.getUsedCharacter
-	local charIdentifier = character.charIdentifier
-	exports.oxmysql:query('SELECT mailbox_id FROM mailboxes WHERE steamname = ? AND `char_identifier` = ?', {Player,charIdentifier}, function(MailID)
-		exports.vorp_inventory:closeInventory(Item.source)
-		TriggerClientEvent("OpenMailTicket",src, MailID[1].mailbox_id)
+if coreType == 'VORPCore' then
+	VORP.RegisterUsableItem('BoxTicket',function(Item)
+		local src = Item.source
+		local user = CoreUtils.getUser(src)
+		local Player = GetPlayerName(src)
+		local character = CoreUtils.getCharacter(user)
+		local charIdentifier = CoreUtils.getIdentifier(character)
+		exports.oxmysql:query('SELECT mailbox_id FROM mailboxes WHERE steamname = ? AND `char_identifier` = ?', {Player,charIdentifier}, function(MailID)
+			exports.vorp_inventory:closeInventory(Item.source)
+			TriggerClientEvent("OpenMailTicket",src, MailID[1].mailbox_id)
+		end)
 	end)
-end)
+end
 
 RegisterCommand('ARead', function(source,args,rawCommand)
 	local src = source
-    local user = VorpCore.getUser(src)
+	local user = CoreUtils.getUser(src)
 	local Player = GetPlayerName(src)
-	local character = user.getUsedCharacter
-	local charIdentifier = character.charIdentifier
+	local character = CoreUtils.getCharacter(user)
+	local charIdentifier = CoreUtils.getIdentifier(character)
 	animselected = args[1]
-	MySQL.query.await('UPDATE `mailboxes` SET `Animation` = ?	WHERE `steamname` = ? AND `char_identifier` = ?',{animselected,Player,charIdentifier})
+	MySQL.query.await('UPDATE `mailboxes` SET `Animation` = ? WHERE `steamname` = ? AND `char_identifier` = ?',{animselected,Player,charIdentifier})
 end)
 
 RegisterNetEvent('AddItemMailToPlayer')
 AddEventHandler('AddItemMailToPlayer', function()
 	local _source = source
-	local Item = exports.vorp_inventory:addItem(_source, 'Mail', 1, lastmessage,callback,false)
+	CoreUtils.addItem(_source, 'Mail', 1)
 end)
 
 RegisterNetEvent('AddItemMailToMailbox')
 AddEventHandler('AddItemMailToMailbox', function(MailBoxID)
 	local _source = source
-	local Mail = {
-		name 	 	= "Mail",
-		metadata 	= lastmessage,
-		amount	 	= 1,
-		limit	 	= 300,
-		weight	 	= "0.00",
-		mainid	 	= 530,
-		percentage 	= 0,
-		label		= "Lettre",
-		count		= 1,
-		isDegradable= false,
-		group		= 1,
-		id			= 530,
-		desc 		= "Message Reçu",
-		type		= "item_standard",		
-	}
-	local items = {Mail}
-	local MailboxMail = exports.vorp_inventory:addItemsToCustomInventory('Mailbox_'..tostring(MailBoxID), items, 6,callback,false)
+	if coreType == 'VORPCore' then
+		local Mail = {
+			name       = "Mail",
+			metadata   = lastmessage,
+			amount     = 1,
+			limit      = 300,
+			weight     = "0.00",
+			mainid     = 530,
+			percentage = 0,
+			label      = "Lettre",
+			count      = 1,
+			isDegradable= false,
+			group      = 1,
+			id         = 530,
+			desc       = "Message Reçu",
+			type       = "item_standard",      
+		}
+		local items = {Mail}
+		local MailboxMail = exports.vorp_inventory:addItemsToCustomInventory('Mailbox_'..tostring(MailBoxID), items, 6,callback,false)
+	else
+		-- Implement mailbox item addition for LXRCore/RSGCore if needed
+	end
 end)
 
 RegisterNetEvent('Mail:IsConnected')
